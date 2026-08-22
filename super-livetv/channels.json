@@ -1,16 +1,16 @@
 {
   "SUPER_TV_1": {
-    "url": "https://example.com/channel1/index.m3u8",
+    "url": "https://restream-tv.vercel.app/live/15037126680149.m3u8",
     "headers": {
-      "User-Agent": "SUPER2026",
+      "User-Agent": "",
       "Referer": "",
       "Origin": ""
     }
   },
   "SUPER_TV_2": {
-    "url": "https://example.com/channel2/index.m3u8",
+    "url": "https://restream-tv.vercel.app/live/15037158268501.m3u8",
     "headers": {
-      "User-Agent": "SUPER2026",
+      "User-Agent": "",
       "Referer": "",
       "Origin": ""
     }
