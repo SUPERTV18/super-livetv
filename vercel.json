@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "functions": {
+    "api/stream.js": {
+      "maxDuration": 60
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/:channel.m3u8",
+      "destination": "/api/stream?channel=:channel"
+    }
+  ]
+}
