@@ -1,206 +1,167 @@
-import fs from 'fs';
-import path from 'path';
+import fs from "fs";
+import path from "path";
 
-const channelsPath = path.join(process.cwd(), 'channels.json');
+const channelsPath = path.join(process.cwd(), "channels.json");
 const channels = JSON.parse(
-  fs.readFileSync(channelsPath, 'utf8')
+  fs.readFileSync(channelsPath, "utf8")
 );
 
 const HOP_BY_HOP = new Set([
-  'connection',
-  'keep-alive',
-  'proxy-authenticate',
-  'proxy-authorization',
-  'te',
-  'trailer',
-  'transfer-encoding',
-  'upgrade',
-  'content-length'
+  "connection",
+  "keep-alive",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+  "content-length"
 ]);
 
 function getChannelName(req) {
   const raw =
     req.query?.channel ||
     req.query?.id ||
-    '';
+    "";
 
   return String(raw)
-    .replace(/^\//, '')
-    .replace(/\.m3u8$/i, '')
-    .split('/')[0];
-}
-
-/*
- * المسار الداخلي النظيف بعد اسم القناة
- *
- * مثال:
- * /SUPERTV_1/proxy/playlist.m3u8
- *
- * يصبح:
- * /proxy/playlist.m3u8
- */
-function getCleanPath(req) {
-  let value =
-    req.query?.path ||
-    req.query?.p ||
-    '';
-
-  value = String(value);
-
-  if (!value) {
-    return '';
-  }
-
-  if (!value.startsWith('/')) {
-    value = '/' + value;
-  }
-
-  return value;
+    .replace(/^\/+/, "")
+    .replace(/\.m3u8$/i, "");
 }
 
 function getAllowedHosts(channel) {
   const hosts = new Set();
 
   try {
-    const base = new URL(channel.url);
-    hosts.add(base.hostname);
+    hosts.add(new URL(channel.url).hostname);
   } catch {}
 
   if (Array.isArray(channel.allowedHosts)) {
     for (const host of channel.allowedHosts) {
       try {
         hosts.add(
-          new URL(`https://${host}`).hostname
+          new URL(
+            host.includes("://")
+              ? host
+              : `https://${host}`
+          ).hostname
         );
-      } catch {
-        // Ignore invalid hosts
-      }
+      } catch {}
     }
   }
 
   return hosts;
 }
 
+/*
+ * استخراج المسار المطلوب من الرابط النظيف
+ *
+ * /SUPERTV_1/proxy/playlist.m3u8
+ *
+ * path =
+ * /proxy/playlist.m3u8
+ */
+function getRequestedPath(req) {
+  let p = req.query?.path || "";
+
+  if (Array.isArray(p)) {
+    p = p.join("/");
+  }
+
+  p = String(p);
+
+  if (!p) {
+    return "";
+  }
+
+  if (!p.startsWith("/")) {
+    p = "/" + p;
+  }
+
+  return p;
+}
+
+/*
+ * تحويل المسار النظيف إلى رابط المصدر
+ *
+ * مثال:
+ *
+ * channel.url =
+ * https://example.com/proxy/playlist.m3u8
+ *
+ * path =
+ * /proxy/segment.ts
+ *
+ * الناتج =
+ * https://example.com/proxy/segment.ts
+ */
 function getUpstreamUrl(channel, req) {
+  const requestedUrl = req.query?.url;
+
   /*
-   * السماح بالطريقة القديمة أيضًا
-   * حتى لا تتعطل أي روابط قديمة.
+   * دعم الطريقة القديمة أيضًا
    */
-  const requested =
-    req.query?.url;
-
-  if (requested) {
-    let target;
-
+  if (requestedUrl) {
     try {
-      target = new URL(
-        String(requested)
+      const target = new URL(
+        String(requestedUrl)
       );
+
+      const allowedHosts =
+        getAllowedHosts(channel);
+
+      if (
+        target.protocol !== "http:" &&
+        target.protocol !== "https:"
+      ) {
+        return null;
+      }
+
+      if (!allowedHosts.has(target.hostname)) {
+        return null;
+      }
+
+      return target.toString();
     } catch {
       return null;
     }
-
-    const allowedHosts =
-      getAllowedHosts(channel);
-
-    if (
-      target.protocol !== 'http:' &&
-      target.protocol !== 'https:'
-    ) {
-      return null;
-    }
-
-    if (
-      !allowedHosts.has(
-        target.hostname
-      )
-    ) {
-      return null;
-    }
-
-    return target.toString();
   }
 
+  const requestedPath =
+    getRequestedPath(req);
+
   /*
-   * الرابط الأساسي للقناة
+   * أول طلب:
+   *
+   * /SUPERTV_1.m3u8
+   *
+   * استخدم رابط القناة الأساسي.
    */
-  if (!getCleanPath(req)) {
+  if (!requestedPath) {
     return channel.url;
   }
 
-  const cleanPath =
-    getCleanPath(req);
-
-  let baseUrl;
+  let base;
 
   try {
-    baseUrl = new URL(
-      channel.url
-    );
+    base = new URL(channel.url);
   } catch {
     return null;
   }
 
   /*
-   * نأخذ مجلد الـ M3U8 الأساسي.
-   *
-   * مثال:
-   * https://host.com/proxy/playlist.m3u8
-   *
-   * المجلد:
-   * /proxy/
+   * المسار النظيف يمثل نفس المسار
+   * الموجود على السيرفر الأصلي.
    */
-  const baseDirectory =
-    new URL(
-      './',
-      channel.url
-    );
-
-  /*
-   * إذا كان المسار يبدأ بنفس مسار
-   * مجلد الـ upstream نستخدمه مباشرة.
-   */
-  let target;
-
-  try {
-    target = new URL(
-      cleanPath,
-      baseUrl.origin
-    );
-  } catch {
-    return null;
-  }
-
-  /*
-   * لو الرابط النظيف كان:
-   *
-   * /proxy/segment.ts
-   *
-   * نستخدمه مباشرة.
-   *
-   * أما لو كان:
-   *
-   * /segment.ts
-   *
-   * نربطه بمجلد الـ M3U8 الأصلي.
-   */
-  if (
-    cleanPath.split('/').filter(Boolean).length === 1
-  ) {
-    target = new URL(
-      cleanPath.replace(/^\//, ''),
-      baseDirectory
-    );
-  }
+  const target = new URL(
+    requestedPath,
+    `${base.protocol}//${base.host}`
+  );
 
   const allowedHosts =
     getAllowedHosts(channel);
 
-  if (
-    !allowedHosts.has(
-      target.hostname
-    )
-  ) {
+  if (!allowedHosts.has(target.hostname)) {
     return null;
   }
 
@@ -208,35 +169,33 @@ function getUpstreamUrl(channel, req) {
 }
 
 /*
- * تحويل رابط الـ upstream إلى رابط نظيف.
+ * إنشاء رابط نظيف
  *
- * مثال:
+ * المصدر:
+ * https://source.com/proxy/segment.ts
  *
- * https://host.com/proxy/segment.ts
- *
- * يصبح:
- *
+ * الناتج:
  * https://super-livetv.vercel.app/SUPERTV_1/proxy/segment.ts
  */
-function proxyUrl(
-  url,
+function makeCleanUrl(
+  upstreamUrl,
   channelName,
   requestOrigin
 ) {
-  const target =
-    new URL(url);
+  const url =
+    new URL(upstreamUrl);
 
-  const cleanPath =
-    target.pathname +
-    target.search;
+  let result =
+    `/${channelName}${url.pathname}`;
 
-  const p =
-    new URL(
-      `/${channelName}${cleanPath}`,
-      requestOrigin
-    );
+  if (url.search) {
+    result += url.search;
+  }
 
-  return p.toString();
+  return new URL(
+    result,
+    requestOrigin
+  ).toString();
 }
 
 function rewriteM3U8(
@@ -246,47 +205,45 @@ function rewriteM3U8(
   requestOrigin
 ) {
   /*
-   * Rewrite URI="..."
+   * URI="..."
    *
-   * مثل:
    * EXT-X-KEY
    * EXT-X-MAP
    * EXT-X-MEDIA
+   * وغيرها
    */
-  let output =
-    text.replace(
-      /URI="([^"]+)"/gi,
-      (match, uri) => {
-        try {
-          const absolute =
-            new URL(
-              uri,
-              baseUrl
-            ).toString();
+  let output = text.replace(
+    /URI="([^"]+)"/gi,
+    (match, uri) => {
+      try {
+        const absolute =
+          new URL(
+            uri,
+            baseUrl
+          ).toString();
 
-          return `URI="${proxyUrl(
-            absolute,
-            channelName,
-            requestOrigin
-          )}"`;
-        } catch {
-          return match;
-        }
+        return `URI="${makeCleanUrl(
+          absolute,
+          channelName,
+          requestOrigin
+        )}"`;
+      } catch {
+        return match;
       }
-    );
+    }
+  );
 
   /*
-   * Rewrite playlists / segments
+   * Playlists / segments
    */
   output = output
     .split(/\r?\n/)
     .map((line) => {
-      const trimmed =
-        line.trim();
+      const trimmed = line.trim();
 
       if (
         !trimmed ||
-        trimmed.startsWith('#')
+        trimmed.startsWith("#")
       ) {
         return line;
       }
@@ -298,7 +255,7 @@ function rewriteM3U8(
             baseUrl
           ).toString();
 
-        return proxyUrl(
+        return makeCleanUrl(
           absolute,
           channelName,
           requestOrigin
@@ -307,30 +264,25 @@ function rewriteM3U8(
         return line;
       }
     })
-    .join('\n');
+    .join("\n");
 
   return output;
 }
 
-export default async function handler(
-  req,
-  res
-) {
+export default async function handler(req, res) {
   try {
     if (
-      req.method !== 'GET' &&
-      req.method !== 'HEAD'
+      req.method !== "GET" &&
+      req.method !== "HEAD"
     ) {
       res.setHeader(
-        'Allow',
-        'GET, HEAD'
+        "Allow",
+        "GET, HEAD"
       );
 
       return res
         .status(405)
-        .send(
-          'Method Not Allowed'
-        );
+        .send("Method Not Allowed");
     }
 
     const channelName =
@@ -340,13 +292,10 @@ export default async function handler(
       channels[channelName];
 
     if (!channel?.url) {
-      return res
-        .status(404)
-        .json({
-          success: false,
-          error:
-            'Channel not found'
-        });
+      return res.status(404).json({
+        success: false,
+        error: "Channel not found"
+      });
     }
 
     const target =
@@ -356,68 +305,60 @@ export default async function handler(
       );
 
     if (!target) {
-      return res
-        .status(403)
-        .json({
-          success: false,
-          error:
-            'Upstream URL is not allowed for this channel'
-        });
+      return res.status(403).json({
+        success: false,
+        error:
+          "Upstream URL is not allowed for this channel"
+      });
     }
 
+    /*
+     * Headers
+     */
     const headers = {
       ...(channel.headers || {})
     };
 
-    /*
-     * Remove empty headers
-     */
-    for (
-      const key of Object.keys(
-        headers
-      )
-    ) {
+    for (const key of Object.keys(headers)) {
       if (!headers[key]) {
         delete headers[key];
       }
     }
 
     /*
-     * Default User-Agent
+     * User-Agent
      */
     if (
-      !headers['User-Agent'] &&
-      !headers['user-agent']
+      !headers["User-Agent"] &&
+      !headers["user-agent"]
     ) {
-      headers['User-Agent'] =
-        'SUPER2026';
+      headers["User-Agent"] = "SUPER2026";
     }
 
     /*
-     * Forward Range
+     * Range
      */
     if (req.headers.range) {
       headers.Range =
         req.headers.range;
     }
 
-    const upstream =
-      await fetch(
-        target,
-        {
-          method: req.method,
-          headers,
-          redirect: 'follow'
-        }
-      );
-
-    const contentType =
-      upstream.headers.get(
-        'content-type'
-      ) || '';
+    const upstream = await fetch(
+      target,
+      {
+        method: req.method,
+        headers,
+        redirect: "follow"
+      }
+    );
 
     const finalUrl =
       upstream.url || target;
+
+    const contentType =
+      upstream.headers.get(
+        "content-type"
+      ) || "";
 
     const isM3U8 =
       /mpegurl|vnd\.apple\.mpegurl/i.test(
@@ -431,48 +372,41 @@ export default async function handler(
      * CORS
      */
     res.setHeader(
-      'Access-Control-Allow-Origin',
-      '*'
+      "Access-Control-Allow-Origin",
+      "*"
     );
 
     res.setHeader(
-      'Access-Control-Allow-Headers',
-      '*'
+      "Access-Control-Allow-Headers",
+      "*"
     );
 
     res.setHeader(
-      'Access-Control-Expose-Headers',
-      '*'
+      "Access-Control-Expose-Headers",
+      "*"
     );
 
     res.setHeader(
-      'Cache-Control',
-      'no-store, no-cache, must-revalidate, proxy-revalidate'
+      "Cache-Control",
+      "no-store, no-cache, must-revalidate, proxy-revalidate"
     );
 
     /*
-     * Upstream Error
+     * Upstream error
      */
     if (!upstream.ok) {
       const body =
         await upstream
           .text()
-          .catch(() => '');
+          .catch(() => "");
 
       return res
-        .status(
-          upstream.status
-        )
+        .status(upstream.status)
         .send(
-          `Upstream error: ${
-            upstream.status
-          }${
+          `Upstream error: ${upstream.status}${
             body
-              ? `\n${body.slice(
-                  0,
-                  500
-                )}`
-              : ''
+              ? `\n${body.slice(0, 500)}`
+              : ""
           }`
         );
     }
@@ -481,9 +415,7 @@ export default async function handler(
      * M3U8
      */
     if (isM3U8) {
-      if (
-        req.method === 'HEAD'
-      ) {
+      if (req.method === "HEAD") {
         return res
           .status(200)
           .end();
@@ -492,22 +424,14 @@ export default async function handler(
       const text =
         await upstream.text();
 
-      const requestOrigin =
-        `${
-          req.headers[
-            'x-forwarded-proto'
-          ] || 'https'
-        }://${
-          req.headers.host
-        }`;
+      const protocol =
+        req.headers[
+          "x-forwarded-proto"
+        ] || "https";
 
-      /*
-       * مهم جدًا:
-       *
-       * نستخدم finalUrl بعد redirects
-       * كـ base للروابط الموجودة
-       * داخل الـ M3U8.
-       */
+      const requestOrigin =
+        `${protocol}://${req.headers.host}`;
+
       const rewritten =
         rewriteM3U8(
           text,
@@ -517,8 +441,8 @@ export default async function handler(
         );
 
       res.setHeader(
-        'Content-Type',
-        'application/vnd.apple.mpegurl'
+        "Content-Type",
+        "application/vnd.apple.mpegurl"
       );
 
       return res
@@ -527,13 +451,11 @@ export default async function handler(
     }
 
     /*
-     * Binary segments
+     * Binary
      */
     for (
-      const [
-        key,
-        value
-      ] of upstream.headers
+      const [key, value]
+      of upstream.headers
     ) {
       if (
         !HOP_BY_HOP.has(
@@ -547,13 +469,9 @@ export default async function handler(
       }
     }
 
-    if (
-      req.method === 'HEAD'
-    ) {
+    if (req.method === "HEAD") {
       return res
-        .status(
-          upstream.status
-        )
+        .status(upstream.status)
         .end();
     }
 
@@ -563,24 +481,19 @@ export default async function handler(
       );
 
     return res
-      .status(
-        upstream.status
-      )
+      .status(upstream.status)
       .send(buffer);
 
   } catch (error) {
     console.error(
-      'Proxy error:',
+      "Proxy error:",
       error
     );
 
-    return res
-      .status(500)
-      .json({
-        success: false,
-        error: 'Proxy error',
-        message:
-          error.message
-      });
+    return res.status(500).json({
+      success: false,
+      error: "Proxy error",
+      message: error.message
+    });
   }
 }
