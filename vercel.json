@@ -9,6 +9,10 @@
     {
       "source": "/:channel.m3u8",
       "destination": "/api/stream?channel=:channel"
+    },
+    {
+      "source": "/:channel/:path*",
+      "destination": "/api/stream?channel=:channel&path=/:path*"
     }
   ]
 }
