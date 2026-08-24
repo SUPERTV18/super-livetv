@@ -3,6 +3,7 @@ import path from "path";
 import crypto from "crypto";
 
 const channelsPath = path.join(process.cwd(), "channels.json");
+
 const channels = JSON.parse(
   fs.readFileSync(channelsPath, "utf8")
 );
@@ -19,14 +20,15 @@ const HOP_BY_HOP = new Set([
   "content-length"
 ]);
 
-/*
- * Token مؤقت للرابط الأصلي.
- *
- * مهم:
- * لا نضع الرابط الأصلي داخل الـ URL الظاهر.
- */
 const TOKEN_SECRET =
-  process.env.STREAM_SECRET || "SUPER_TV_2026_SECRET";
+  process.env.STREAM_SECRET ||
+  "SUPER_TV_2026_SECRET";
+
+/*
+ * =========================================================
+ * TOKEN
+ * =========================================================
+ */
 
 function encodeTarget(channelName, targetUrl) {
   const payload = JSON.stringify({
@@ -40,7 +42,10 @@ function encodeTarget(channelName, targetUrl) {
   ).toString("base64url");
 
   const signature = crypto
-    .createHmac("sha256", TOKEN_SECRET)
+    .createHmac(
+      "sha256",
+      TOKEN_SECRET
+    )
     .update(encoded)
     .digest("base64url")
     .slice(0, 32);
@@ -50,15 +55,24 @@ function encodeTarget(channelName, targetUrl) {
 
 function decodeTarget(token) {
   try {
-    const [encoded, signature] =
-      String(token).split(".");
+    const parts = String(token).split(".");
+
+    if (parts.length !== 2) {
+      return null;
+    }
+
+    const encoded = parts[0];
+    const signature = parts[1];
 
     if (!encoded || !signature) {
       return null;
     }
 
     const expected = crypto
-      .createHmac("sha256", TOKEN_SECRET)
+      .createHmac(
+        "sha256",
+        TOKEN_SECRET
+      )
       .update(encoded)
       .digest("base64url")
       .slice(0, 32);
@@ -75,17 +89,25 @@ function decodeTarget(token) {
     );
 
     if (
-      !payload?.c ||
-      !payload?.u
+      !payload ||
+      !payload.c ||
+      !payload.u
     ) {
       return null;
     }
 
     return payload;
+
   } catch {
     return null;
   }
 }
+
+/*
+ * =========================================================
+ * CHANNEL
+ * =========================================================
+ */
 
 function getChannelName(req) {
   const raw =
@@ -98,16 +120,31 @@ function getChannelName(req) {
     .replace(/\.m3u8$/i, "");
 }
 
+/*
+ * =========================================================
+ * ALLOWED HOSTS
+ * =========================================================
+ */
+
 function getAllowedHosts(channel) {
   const hosts = new Set();
 
   try {
     const base = new URL(channel.url);
-    hosts.add(base.hostname);
+
+    hosts.add(
+      base.hostname
+    );
   } catch {}
 
-  if (Array.isArray(channel.allowedHosts)) {
-    for (const host of channel.allowedHosts) {
+  if (
+    Array.isArray(
+      channel.allowedHosts
+    )
+  ) {
+    for (
+      const host of channel.allowedHosts
+    ) {
       try {
         hosts.add(
           new URL(
@@ -123,9 +160,13 @@ function getAllowedHosts(channel) {
   return hosts;
 }
 
-function isAllowedUrl(channel, target) {
+function isAllowedUrl(
+  channel,
+  target
+) {
   try {
-    const url = new URL(target);
+    const url =
+      new URL(target);
 
     if (
       url.protocol !== "http:" &&
@@ -134,36 +175,55 @@ function isAllowedUrl(channel, target) {
       return false;
     }
 
-    return getAllowedHosts(channel).has(
+    return getAllowedHosts(
+      channel
+    ).has(
       url.hostname
     );
+
   } catch {
     return false;
   }
 }
 
 /*
- * إنشاء الرابط النظيف.
+ * =========================================================
+ * CLEAN URL
+ * =========================================================
  *
- * مثال:
+ * المصدر:
  *
- * /SUPERTV_1/AbCdEf...
+ * https://original-server.com/path/segment.ts
+ *
+ * يصبح:
+ *
+ * https://super-livetv.vercel.app/SUPERTV_1/TOKEN
+ *
+ * بدون إظهار الرابط الأصلي.
  */
+
 function cleanProxyUrl(
   channelName,
   targetUrl,
   requestOrigin
 ) {
-  const token = encodeTarget(
-    channelName,
-    targetUrl
-  );
+  const token =
+    encodeTarget(
+      channelName,
+      targetUrl
+    );
 
   return new URL(
     `/${channelName}/${token}`,
     requestOrigin
   ).toString();
 }
+
+/*
+ * =========================================================
+ * M3U8 REWRITE
+ * =========================================================
+ */
 
 function rewriteM3U8(
   text,
@@ -175,35 +235,39 @@ function rewriteM3U8(
    * EXT-X-KEY
    * EXT-X-MAP
    * EXT-X-MEDIA
-   * إلخ
+   * وغيرها
    */
-  let output = text.replace(
-    /URI="([^"]+)"/gi,
-    (match, uri) => {
-      try {
-        const absolute = new URL(
-          uri,
-          baseUrl
-        ).toString();
+  let output =
+    text.replace(
+      /URI="([^"]+)"/gi,
+      (match, uri) => {
+        try {
+          const absolute =
+            new URL(
+              uri,
+              baseUrl
+            ).toString();
 
-        return `URI="${cleanProxyUrl(
-          channelName,
-          absolute,
-          requestOrigin
-        )}"`;
-      } catch {
-        return match;
+          return `URI="${cleanProxyUrl(
+            channelName,
+            absolute,
+            requestOrigin
+          )}"`;
+
+        } catch {
+          return match;
+        }
       }
-    }
-  );
+    );
 
   /*
-   * Playlists + Segments
+   * Playlists / Segments
    */
   output = output
     .split(/\r?\n/)
     .map((line) => {
-      const trimmed = line.trim();
+      const trimmed =
+        line.trim();
 
       if (
         !trimmed ||
@@ -213,16 +277,18 @@ function rewriteM3U8(
       }
 
       try {
-        const absolute = new URL(
-          trimmed,
-          baseUrl
-        ).toString();
+        const absolute =
+          new URL(
+            trimmed,
+            baseUrl
+          ).toString();
 
         return cleanProxyUrl(
           channelName,
           absolute,
           requestOrigin
         );
+
       } catch {
         return line;
       }
@@ -232,11 +298,21 @@ function rewriteM3U8(
   return output;
 }
 
+/*
+ * =========================================================
+ * HANDLER
+ * =========================================================
+ */
+
 export default async function handler(
   req,
   res
 ) {
   try {
+
+    /*
+     * GET / HEAD فقط
+     */
     if (
       req.method !== "GET" &&
       req.method !== "HEAD"
@@ -248,9 +324,38 @@ export default async function handler(
 
       return res
         .status(405)
-        .send("Method Not Allowed");
+        .send(
+          "Method Not Allowed"
+        );
     }
 
+    /*
+     * =====================================================
+     * منع ?url= نهائيًا
+     * =====================================================
+     *
+     * أي محاولة مثل:
+     *
+     * /api/stream?channel=SUPERTV_1&url=https://...
+     *
+     * يتم رفضها.
+     */
+
+    if (
+      req.query?.url
+    ) {
+      return res
+        .status(403)
+        .json({
+          success: false,
+          error:
+            "Direct upstream URL access is disabled"
+        });
+    }
+
+    /*
+     * Channel
+     */
     const channelName =
       getChannelName(req);
 
@@ -258,14 +363,19 @@ export default async function handler(
       channels[channelName];
 
     if (!channel?.url) {
-      return res.status(404).json({
-        success: false,
-        error: "Channel not found"
-      });
+      return res
+        .status(404)
+        .json({
+          success: false,
+          error:
+            "Channel not found"
+        });
     }
 
     /*
-     * تحديد الرابط الأصلي.
+     * =====================================================
+     * تحديد المصدر
+     * =====================================================
      *
      * أول طلب:
      *
@@ -273,93 +383,103 @@ export default async function handler(
      *
      * يستخدم channel.url
      *
-     * أما الطلبات التالية:
+     * الطلبات التالية:
      *
      * /SUPERTV_1/TOKEN
      *
-     * تستخرج الرابط الأصلي من الـ token.
+     * تستخرج المصدر من الـ Token.
      */
-    let target = channel.url;
+
+    let target =
+      channel.url;
 
     const token =
       req.query?.token;
 
     if (token) {
+
       const decoded =
-        decodeTarget(token);
+        decodeTarget(
+          token
+        );
 
       if (!decoded) {
-        return res.status(403).json({
-          success: false,
-          error: "Invalid stream token"
-        });
+        return res
+          .status(403)
+          .json({
+            success: false,
+            error:
+              "Invalid stream token"
+          });
       }
 
+      /*
+       * التأكد أن الـ Token
+       * خاص بنفس القناة
+       */
       if (
-        decoded.c !== channelName
+        decoded.c !==
+        channelName
       ) {
-        return res.status(403).json({
-          success: false,
-          error: "Invalid channel"
-        });
+        return res
+          .status(403)
+          .json({
+            success: false,
+            error:
+              "Invalid channel"
+          });
       }
 
+      /*
+       * التأكد أن المصدر
+       * من Host مسموح
+       */
       if (
         !isAllowedUrl(
           channel,
           decoded.u
         )
       ) {
-        return res.status(403).json({
-          success: false,
-          error:
-            "Upstream URL is not allowed for this channel"
-        });
+        return res
+          .status(403)
+          .json({
+            success: false,
+            error:
+              "Upstream URL is not allowed"
+          });
       }
 
-      target = decoded.u;
+      target =
+        decoded.u;
     }
 
     /*
-     * دعم الرابط القديم أيضًا
-     */
-    if (!token && req.query?.url) {
-      const requested =
-        String(req.query.url);
-
-      if (
-        !isAllowedUrl(
-          channel,
-          requested
-        )
-      ) {
-        return res.status(403).json({
-          success: false,
-          error:
-            "Upstream URL is not allowed for this channel"
-        });
-      }
-
-      target = requested;
-    }
-
-    /*
+     * =====================================================
      * Headers
+     * =====================================================
      */
+
     const headers = {
       ...(channel.headers || {})
     };
 
+    /*
+     * إزالة Headers الفارغة
+     */
     for (
-      const key of Object.keys(headers)
+      const key of Object.keys(
+        headers
+      )
     ) {
-      if (!headers[key]) {
+      if (
+        !headers[key]
+      ) {
         delete headers[key];
       }
     }
 
     /*
-     * Default User-Agent
+     * User-Agent
      */
     if (
       !headers["User-Agent"] &&
@@ -370,21 +490,32 @@ export default async function handler(
     }
 
     /*
-     * Forward Range
+     * Range
      */
-    if (req.headers.range) {
+    if (
+      req.headers.range
+    ) {
       headers.Range =
         req.headers.range;
     }
 
-    const upstream = await fetch(
-      target,
-      {
-        method: req.method,
-        headers,
-        redirect: "follow"
-      }
-    );
+    /*
+     * =====================================================
+     * Fetch
+     * =====================================================
+     */
+
+    const upstream =
+      await fetch(
+        target,
+        {
+          method:
+            req.method,
+          headers,
+          redirect:
+            "follow"
+        }
+      );
 
     const contentType =
       upstream.headers.get(
@@ -392,7 +523,8 @@ export default async function handler(
       ) || "";
 
     const finalUrl =
-      upstream.url || target;
+      upstream.url ||
+      target;
 
     const isM3U8 =
       /mpegurl|vnd\.apple\.mpegurl/i.test(
@@ -403,8 +535,11 @@ export default async function handler(
       );
 
     /*
+     * =====================================================
      * CORS
+     * =====================================================
      */
+
     res.setHeader(
       "Access-Control-Allow-Origin",
       "*"
@@ -426,16 +561,24 @@ export default async function handler(
     );
 
     /*
-     * Upstream error
+     * =====================================================
+     * Upstream Error
+     * =====================================================
      */
+
     if (!upstream.ok) {
+
       const body =
         await upstream
           .text()
-          .catch(() => "");
+          .catch(
+            () => ""
+          );
 
       return res
-        .status(upstream.status)
+        .status(
+          upstream.status
+        )
         .send(
           `Upstream error: ${
             upstream.status
@@ -451,11 +594,16 @@ export default async function handler(
     }
 
     /*
+     * =====================================================
      * M3U8
+     * =====================================================
      */
+
     if (isM3U8) {
+
       if (
-        req.method === "HEAD"
+        req.method ===
+        "HEAD"
       ) {
         return res
           .status(200)
@@ -465,14 +613,13 @@ export default async function handler(
       const text =
         await upstream.text();
 
+      const protocol =
+        req.headers[
+          "x-forwarded-proto"
+        ] || "https";
+
       const requestOrigin =
-        `${
-          req.headers[
-            "x-forwarded-proto"
-          ] || "https"
-        }://${
-          req.headers.host
-        }`;
+        `${protocol}://${req.headers.host}`;
 
       const rewritten =
         rewriteM3U8(
@@ -482,6 +629,15 @@ export default async function handler(
           requestOrigin
         );
 
+      /*
+       * منع أي URL أصلي
+       * ممكن يكون متبقي
+       *
+       * الروابط التي يسمح بها
+       * فقط هي الروابط التي
+       * تم تحويلها إلى Token.
+       */
+
       res.setHeader(
         "Content-Type",
         "application/vnd.apple.mpegurl"
@@ -489,12 +645,17 @@ export default async function handler(
 
       return res
         .status(200)
-        .send(rewritten);
+        .send(
+          rewritten
+        );
     }
 
     /*
-     * Binary segments
+     * =====================================================
+     * Binary Segments
+     * =====================================================
      */
+
     for (
       const [
         key,
@@ -514,10 +675,13 @@ export default async function handler(
     }
 
     if (
-      req.method === "HEAD"
+      req.method ===
+      "HEAD"
     ) {
       return res
-        .status(upstream.status)
+        .status(
+          upstream.status
+        )
         .end();
     }
 
@@ -527,19 +691,28 @@ export default async function handler(
       );
 
     return res
-      .status(upstream.status)
-      .send(buffer);
+      .status(
+        upstream.status
+      )
+      .send(
+        buffer
+      );
 
   } catch (error) {
+
     console.error(
       "Proxy error:",
       error
     );
 
-    return res.status(500).json({
-      success: false,
-      error: "Proxy error",
-      message: error.message
-    });
+    return res
+      .status(500)
+      .json({
+        success: false,
+        error:
+          "Proxy error",
+        message:
+          error.message
+      });
   }
 }
