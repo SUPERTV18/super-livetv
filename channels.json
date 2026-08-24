@@ -1,6 +1,10 @@
 {
   "SUPERTV_1": {
     "url": "https://restream-tv.vercel.app/live/15037126680149.m3u8",
+    "allowedHosts": [
+      "restream-tv.vercel.app",
+      "abdallasaed98-aboud-streem.hf.space"
+    ],
     "headers": {
       "User-Agent": "",
       "Referer": "",
@@ -9,6 +13,10 @@
   },
   "SUPERTV_2": {
     "url": "https://restream-tv.vercel.app/live/15037158268501.m3u8",
+    "allowedHosts": [
+      "restream-tv.vercel.app",
+      "abdallasaed98-aboud-streem.hf.space"
+    ],
     "headers": {
       "User-Agent": "",
       "Referer": "",
