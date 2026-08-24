@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import crypto from "crypto";
 
 const channelsPath = path.join(process.cwd(), "channels.json");
 const channels = JSON.parse(
@@ -18,6 +19,74 @@ const HOP_BY_HOP = new Set([
   "content-length"
 ]);
 
+/*
+ * Token مؤقت للرابط الأصلي.
+ *
+ * مهم:
+ * لا نضع الرابط الأصلي داخل الـ URL الظاهر.
+ */
+const TOKEN_SECRET =
+  process.env.STREAM_SECRET || "SUPER_TV_2026_SECRET";
+
+function encodeTarget(channelName, targetUrl) {
+  const payload = JSON.stringify({
+    c: channelName,
+    u: targetUrl
+  });
+
+  const encoded = Buffer.from(
+    payload,
+    "utf8"
+  ).toString("base64url");
+
+  const signature = crypto
+    .createHmac("sha256", TOKEN_SECRET)
+    .update(encoded)
+    .digest("base64url")
+    .slice(0, 32);
+
+  return `${encoded}.${signature}`;
+}
+
+function decodeTarget(token) {
+  try {
+    const [encoded, signature] =
+      String(token).split(".");
+
+    if (!encoded || !signature) {
+      return null;
+    }
+
+    const expected = crypto
+      .createHmac("sha256", TOKEN_SECRET)
+      .update(encoded)
+      .digest("base64url")
+      .slice(0, 32);
+
+    if (signature !== expected) {
+      return null;
+    }
+
+    const payload = JSON.parse(
+      Buffer.from(
+        encoded,
+        "base64url"
+      ).toString("utf8")
+    );
+
+    if (
+      !payload?.c ||
+      !payload?.u
+    ) {
+      return null;
+    }
+
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
 function getChannelName(req) {
   const raw =
     req.query?.channel ||
@@ -33,7 +102,8 @@ function getAllowedHosts(channel) {
   const hosts = new Set();
 
   try {
-    hosts.add(new URL(channel.url).hostname);
+    const base = new URL(channel.url);
+    hosts.add(base.hostname);
   } catch {}
 
   if (Array.isArray(channel.allowedHosts)) {
@@ -53,147 +123,44 @@ function getAllowedHosts(channel) {
   return hosts;
 }
 
-/*
- * استخراج المسار المطلوب من الرابط النظيف
- *
- * /SUPERTV_1/proxy/playlist.m3u8
- *
- * path =
- * /proxy/playlist.m3u8
- */
-function getRequestedPath(req) {
-  let p = req.query?.path || "";
+function isAllowedUrl(channel, target) {
+  try {
+    const url = new URL(target);
 
-  if (Array.isArray(p)) {
-    p = p.join("/");
+    if (
+      url.protocol !== "http:" &&
+      url.protocol !== "https:"
+    ) {
+      return false;
+    }
+
+    return getAllowedHosts(channel).has(
+      url.hostname
+    );
+  } catch {
+    return false;
   }
-
-  p = String(p);
-
-  if (!p) {
-    return "";
-  }
-
-  if (!p.startsWith("/")) {
-    p = "/" + p;
-  }
-
-  return p;
 }
 
 /*
- * تحويل المسار النظيف إلى رابط المصدر
+ * إنشاء الرابط النظيف.
  *
  * مثال:
  *
- * channel.url =
- * https://example.com/proxy/playlist.m3u8
- *
- * path =
- * /proxy/segment.ts
- *
- * الناتج =
- * https://example.com/proxy/segment.ts
+ * /SUPERTV_1/AbCdEf...
  */
-function getUpstreamUrl(channel, req) {
-  const requestedUrl = req.query?.url;
-
-  /*
-   * دعم الطريقة القديمة أيضًا
-   */
-  if (requestedUrl) {
-    try {
-      const target = new URL(
-        String(requestedUrl)
-      );
-
-      const allowedHosts =
-        getAllowedHosts(channel);
-
-      if (
-        target.protocol !== "http:" &&
-        target.protocol !== "https:"
-      ) {
-        return null;
-      }
-
-      if (!allowedHosts.has(target.hostname)) {
-        return null;
-      }
-
-      return target.toString();
-    } catch {
-      return null;
-    }
-  }
-
-  const requestedPath =
-    getRequestedPath(req);
-
-  /*
-   * أول طلب:
-   *
-   * /SUPERTV_1.m3u8
-   *
-   * استخدم رابط القناة الأساسي.
-   */
-  if (!requestedPath) {
-    return channel.url;
-  }
-
-  let base;
-
-  try {
-    base = new URL(channel.url);
-  } catch {
-    return null;
-  }
-
-  /*
-   * المسار النظيف يمثل نفس المسار
-   * الموجود على السيرفر الأصلي.
-   */
-  const target = new URL(
-    requestedPath,
-    `${base.protocol}//${base.host}`
-  );
-
-  const allowedHosts =
-    getAllowedHosts(channel);
-
-  if (!allowedHosts.has(target.hostname)) {
-    return null;
-  }
-
-  return target.toString();
-}
-
-/*
- * إنشاء رابط نظيف
- *
- * المصدر:
- * https://source.com/proxy/segment.ts
- *
- * الناتج:
- * https://super-livetv.vercel.app/SUPERTV_1/proxy/segment.ts
- */
-function makeCleanUrl(
-  upstreamUrl,
+function cleanProxyUrl(
   channelName,
+  targetUrl,
   requestOrigin
 ) {
-  const url =
-    new URL(upstreamUrl);
-
-  let result =
-    `/${channelName}${url.pathname}`;
-
-  if (url.search) {
-    result += url.search;
-  }
+  const token = encodeTarget(
+    channelName,
+    targetUrl
+  );
 
   return new URL(
-    result,
+    `/${channelName}/${token}`,
     requestOrigin
   ).toString();
 }
@@ -205,26 +172,23 @@ function rewriteM3U8(
   requestOrigin
 ) {
   /*
-   * URI="..."
-   *
    * EXT-X-KEY
    * EXT-X-MAP
    * EXT-X-MEDIA
-   * وغيرها
+   * إلخ
    */
   let output = text.replace(
     /URI="([^"]+)"/gi,
     (match, uri) => {
       try {
-        const absolute =
-          new URL(
-            uri,
-            baseUrl
-          ).toString();
+        const absolute = new URL(
+          uri,
+          baseUrl
+        ).toString();
 
-        return `URI="${makeCleanUrl(
-          absolute,
+        return `URI="${cleanProxyUrl(
           channelName,
+          absolute,
           requestOrigin
         )}"`;
       } catch {
@@ -234,7 +198,7 @@ function rewriteM3U8(
   );
 
   /*
-   * Playlists / segments
+   * Playlists + Segments
    */
   output = output
     .split(/\r?\n/)
@@ -249,15 +213,14 @@ function rewriteM3U8(
       }
 
       try {
-        const absolute =
-          new URL(
-            trimmed,
-            baseUrl
-          ).toString();
+        const absolute = new URL(
+          trimmed,
+          baseUrl
+        ).toString();
 
-        return makeCleanUrl(
-          absolute,
+        return cleanProxyUrl(
           channelName,
+          absolute,
           requestOrigin
         );
       } catch {
@@ -269,7 +232,10 @@ function rewriteM3U8(
   return output;
 }
 
-export default async function handler(req, res) {
+export default async function handler(
+  req,
+  res
+) {
   try {
     if (
       req.method !== "GET" &&
@@ -298,18 +264,83 @@ export default async function handler(req, res) {
       });
     }
 
-    const target =
-      getUpstreamUrl(
-        channel,
-        req
-      );
+    /*
+     * تحديد الرابط الأصلي.
+     *
+     * أول طلب:
+     *
+     * /SUPERTV_1.m3u8
+     *
+     * يستخدم channel.url
+     *
+     * أما الطلبات التالية:
+     *
+     * /SUPERTV_1/TOKEN
+     *
+     * تستخرج الرابط الأصلي من الـ token.
+     */
+    let target = channel.url;
 
-    if (!target) {
-      return res.status(403).json({
-        success: false,
-        error:
-          "Upstream URL is not allowed for this channel"
-      });
+    const token =
+      req.query?.token;
+
+    if (token) {
+      const decoded =
+        decodeTarget(token);
+
+      if (!decoded) {
+        return res.status(403).json({
+          success: false,
+          error: "Invalid stream token"
+        });
+      }
+
+      if (
+        decoded.c !== channelName
+      ) {
+        return res.status(403).json({
+          success: false,
+          error: "Invalid channel"
+        });
+      }
+
+      if (
+        !isAllowedUrl(
+          channel,
+          decoded.u
+        )
+      ) {
+        return res.status(403).json({
+          success: false,
+          error:
+            "Upstream URL is not allowed for this channel"
+        });
+      }
+
+      target = decoded.u;
+    }
+
+    /*
+     * دعم الرابط القديم أيضًا
+     */
+    if (!token && req.query?.url) {
+      const requested =
+        String(req.query.url);
+
+      if (
+        !isAllowedUrl(
+          channel,
+          requested
+        )
+      ) {
+        return res.status(403).json({
+          success: false,
+          error:
+            "Upstream URL is not allowed for this channel"
+        });
+      }
+
+      target = requested;
     }
 
     /*
@@ -319,24 +350,27 @@ export default async function handler(req, res) {
       ...(channel.headers || {})
     };
 
-    for (const key of Object.keys(headers)) {
+    for (
+      const key of Object.keys(headers)
+    ) {
       if (!headers[key]) {
         delete headers[key];
       }
     }
 
     /*
-     * User-Agent
+     * Default User-Agent
      */
     if (
       !headers["User-Agent"] &&
       !headers["user-agent"]
     ) {
-      headers["User-Agent"] = "SUPER2026";
+      headers["User-Agent"] =
+        "SUPER2026";
     }
 
     /*
-     * Range
+     * Forward Range
      */
     if (req.headers.range) {
       headers.Range =
@@ -352,13 +386,13 @@ export default async function handler(req, res) {
       }
     );
 
-    const finalUrl =
-      upstream.url || target;
-
     const contentType =
       upstream.headers.get(
         "content-type"
       ) || "";
+
+    const finalUrl =
+      upstream.url || target;
 
     const isM3U8 =
       /mpegurl|vnd\.apple\.mpegurl/i.test(
@@ -403,9 +437,14 @@ export default async function handler(req, res) {
       return res
         .status(upstream.status)
         .send(
-          `Upstream error: ${upstream.status}${
+          `Upstream error: ${
+            upstream.status
+          }${
             body
-              ? `\n${body.slice(0, 500)}`
+              ? `\n${body.slice(
+                  0,
+                  500
+                )}`
               : ""
           }`
         );
@@ -415,7 +454,9 @@ export default async function handler(req, res) {
      * M3U8
      */
     if (isM3U8) {
-      if (req.method === "HEAD") {
+      if (
+        req.method === "HEAD"
+      ) {
         return res
           .status(200)
           .end();
@@ -424,13 +465,14 @@ export default async function handler(req, res) {
       const text =
         await upstream.text();
 
-      const protocol =
-        req.headers[
-          "x-forwarded-proto"
-        ] || "https";
-
       const requestOrigin =
-        `${protocol}://${req.headers.host}`;
+        `${
+          req.headers[
+            "x-forwarded-proto"
+          ] || "https"
+        }://${
+          req.headers.host
+        }`;
 
       const rewritten =
         rewriteM3U8(
@@ -451,11 +493,13 @@ export default async function handler(req, res) {
     }
 
     /*
-     * Binary
+     * Binary segments
      */
     for (
-      const [key, value]
-      of upstream.headers
+      const [
+        key,
+        value
+      ] of upstream.headers
     ) {
       if (
         !HOP_BY_HOP.has(
@@ -469,7 +513,9 @@ export default async function handler(req, res) {
       }
     }
 
-    if (req.method === "HEAD") {
+    if (
+      req.method === "HEAD"
+    ) {
       return res
         .status(upstream.status)
         .end();
