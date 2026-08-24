@@ -34,8 +34,7 @@ const HOP_BY_HOP = new Set([
  */
 
 const STREAM_SECRET =
-  process.env.STREAM_SECRET ||
-  "CHANGE_THIS_SECRET_IN_VERCEL";
+  "SUPER_TV_AES_2026_9f7c2a8d4e1b6c3f5a0e8d2b7c4f9a1e";
 
 /*
  * تحويل الـ Secret إلى مفتاح AES-256
