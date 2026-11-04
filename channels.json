@@ -94,5 +94,29 @@
       "Referer": "",
       "Origin": ""
     }
+  },
+  "KIDS": {
+    "url": "https://blc2cr.linkip.org/live/90068_.m3u8?play=",
+    "allowedHosts": [
+      "restream-tv-beta.vercel.app",
+      "abdallasaed98-aboud-streem.hf.space"
+    ],
+    "headers": {
+      "User-Agent": "",
+      "Referer": "",
+      "Origin": ""
+    }
+  },
+  "AFLAM": {
+    "url": "https://blc2cr.linkip.org/live/90055_.m3u8?play=",
+    "allowedHosts": [
+      "restream-tv-beta.vercel.app",
+      "abdallasaed98-aboud-streem.hf.space"
+    ],
+    "headers": {
+      "User-Agent": "",
+      "Referer": "",
+      "Origin": ""
+    }
   }
 }
