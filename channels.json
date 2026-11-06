@@ -1,9 +1,9 @@
 {
   "SUPERTV_1": {
-    "url": "https://pylink-python-project-web-runner-sharer.ai.studio/live/ok/15037126680149.m3u8",
+    "url": "https://super-tvlive/live/ok/15037126680149.m3u8",
     "allowedHosts": [
       "restream-tv-beta.vercel.app",
-      "pylink-python-project-web-runner-sharer.ai.studio"
+      "super-tvlive"
     ],
     "headers": {
       "User-Agent": "",
@@ -12,10 +12,10 @@
     }
   },
   "SUPERTV_2": {
-    "url": "https://pylink-python-project-web-runner-sharer.ai.studio/live/ok/15037158268501.m3u8",
+    "url": "https://super-tvlive/live/ok/15037158268501.m3u8",
     "allowedHosts": [
       "restream-tv-beta.vercel.app",
-      "pylink-python-project-web-runner-sharer.ai.studio"
+      "super-tvlive"
     ],
     "headers": {
       "User-Agent": "",
@@ -24,10 +24,10 @@
     }
   },
   "SUPERTV_3": {
-    "url": "https://pylink-python-project-web-runner-sharer.ai.studio/live/ok/15651304709717.m3u8",
+    "url": "https://super-tvlive/live/ok/15651304709717.m3u8",
     "allowedHosts": [
       "restream-tv-beta.vercel.app",
-      "pylink-python-project-web-runner-sharer.ai.studio"
+      "super-tvlive"
     ],
     "headers": {
       "User-Agent": "",
@@ -36,10 +36,10 @@
     }
   },
   "SUPERTV_4": {
-    "url": "https://pylink-python-project-web-runner-sharer.ai.studio/live/ok/15651325025877.m3u8",
+    "url": "https://super-tvlive/live/ok/15651325025877.m3u8",
     "allowedHosts": [
       "restream-tv-beta.vercel.app",
-      "pylink-python-project-web-runner-sharer.ai.studio"
+      "super-tvlive"
     ],
     "headers": {
       "User-Agent": "",
@@ -48,10 +48,10 @@
     }
   },
   "SUPERTV_QURAAN": {
-    "url": "https://pylink-python-project-web-runner-sharer.ai.studio/live/ok/15651334528597.m3u8",
+    "url": "https://super-tvlive/live/ok/15651334528597.m3u8",
     "allowedHosts": [
       "restream-tv-beta.vercel.app",
-      "pylink-python-project-web-runner-sharer.ai.studio"
+      "super-tvlive"
     ],
     "headers": {
       "User-Agent": "",
@@ -60,10 +60,10 @@
     }
   },
   "SUPERTV_AFLAM": {
-    "url": "https://pylink-python-project-web-runner-sharer.ai.studio/live/ok/15651343638101.m3u8",
+    "url": "https://super-tvlive/live/ok/15651343638101.m3u8",
     "allowedHosts": [
       "restream-tv-beta.vercel.app",
-      "pylink-python-project-web-runner-sharer.ai.studio"
+      "super-tvlive"
     ],
     "headers": {
       "User-Agent": "",
@@ -72,10 +72,10 @@
     }
   },
   "SUPERTV_MUSALSALAT": {
-    "url": "https://pylink-python-project-web-runner-sharer.ai.studio/live/ok/15651360939605.m3u8",
+    "url": "https://super-tvlive/live/ok/15651360939605.m3u8",
     "allowedHosts": [
       "restream-tv-beta.vercel.app",
-      "pylink-python-project-web-runner-sharer.ai.studio"
+      "super-tvlive"
     ],
     "headers": {
       "User-Agent": "",
@@ -84,10 +84,10 @@
     }
   },
   "SUPERTV_KIDS": {
-    "url": "https://pylink-python-project-web-runner-sharer.ai.studio/live/ok/15651369393749.m3u8",
+    "url": "https://super-tvlive/live/ok/15651369393749.m3u8",
     "allowedHosts": [
       "restream-tv-beta.vercel.app",
-      "pylink-python-project-web-runner-sharer.ai.studio"
+      "super-tvlive"
     ],
     "headers": {
       "User-Agent": "",
