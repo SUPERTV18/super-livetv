@@ -1,0 +1,7 @@
+name = "super-livetv-9ux"
+main = "src/worker.js"
+compatibility_date = "2026-11-08"
+workers_dev = true
+
+[observability]
+enabled = true
