@@ -1,4 +1,4 @@
-name = "super-livetv-9ux"
+name = "super-livetv"
 main = "src/worker.js"
 compatibility_date = "2026-11-08"
 workers_dev = true
