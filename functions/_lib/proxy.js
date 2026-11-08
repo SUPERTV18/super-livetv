@@ -26,44 +26,16 @@ function fromBase64Url(value) {
   return Uint8Array.from(binary, char => char.charCodeAt(0));
 }
 
-async function getAesKey(secret) {
-  if (!secret) throw new Error("STREAM_SECRET is not configured");
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
-  return crypto.subtle.importKey("raw", digest, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
-}
-
-async function encryptTarget(channelName, targetUrl, secret) {
-  const key = await getAesKey(secret);
-  const iv = crypto.getRandomValues(new Uint8Array(12));
+function encodeTarget(channelName, targetUrl) {
   const payload = new TextEncoder().encode(JSON.stringify({
     c: channelName, u: targetUrl, t: Date.now()
   }));
-  // Web Crypto returns ciphertext || 16-byte tag. Reorder to IV || tag || ciphertext.
-  const encrypted = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv, tagLength: 128 }, key, payload));
-  const tag = encrypted.slice(encrypted.length - 16);
-  const ciphertext = encrypted.slice(0, encrypted.length - 16);
-  const packed = new Uint8Array(iv.length + tag.length + ciphertext.length);
-  packed.set(iv, 0);
-  packed.set(tag, iv.length);
-  packed.set(ciphertext, iv.length + tag.length);
-  return toBase64Url(packed);
+  return toBase64Url(payload);
 }
 
-async function decryptTarget(token, secret) {
+function decodeTarget(token) {
   try {
-    const data = fromBase64Url(token);
-    if (data.length < 29) return null;
-    const iv = data.slice(0, 12);
-    const tag = data.slice(12, 28);
-    const ciphertext = data.slice(28);
-    const combined = new Uint8Array(ciphertext.length + tag.length);
-    combined.set(ciphertext, 0);
-    combined.set(tag, ciphertext.length);
-    const key = await getAesKey(secret);
-    const decrypted = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv, tagLength: 128 }, key, combined
-    );
-    const payload = JSON.parse(new TextDecoder().decode(decrypted));
+    const payload = JSON.parse(new TextDecoder().decode(fromBase64Url(token)));
     return payload && payload.c && payload.u ? payload : null;
   } catch {
     return null;
@@ -94,19 +66,19 @@ function isAllowedUrl(channel, target) {
   }
 }
 
-async function makeProxyUrl(channelName, targetUrl, requestUrl, secret) {
-  const token = await encryptTarget(channelName, targetUrl, secret);
+async function makeProxyUrl(channelName, targetUrl, requestUrl) {
+  const token = encodeTarget(channelName, targetUrl);
   return new URL("/" + encodeURIComponent(channelName) + "/" + token, requestUrl.origin).toString();
 }
 
-async function rewriteM3U8(body, baseUrl, channelName, requestUrl, secret) {
+async function rewriteM3U8(body, baseUrl, channelName, requestUrl) {
   let output = body.replace(/URI="([^"]+)"/gi, asyncMatch => asyncMatch);
   const uriPattern = /URI="([^"]+)"/gi;
   const uriMatches = [...body.matchAll(uriPattern)];
   for (const match of uriMatches) {
     try {
       const absolute = new URL(match[1], baseUrl).toString();
-      const proxied = await makeProxyUrl(channelName, absolute, requestUrl, secret);
+      const proxied = await makeProxyUrl(channelName, absolute, requestUrl);
       output = output.replace(match[0], 'URI="' + proxied + '"');
     } catch {}
   }
@@ -149,7 +121,7 @@ export async function handleStream(request, params, env) {
   const requestUrl = new URL(request.url);
   let target = channel.url;
   if (params.token) {
-    const decoded = await decryptTarget(params.token, env.STREAM_SECRET);
+    const decoded = decodeTarget(params.token);
     if (!decoded) {
       return new Response(JSON.stringify({ success: false, error: "Invalid or corrupted stream token" }), {
         status: 403, headers: responseHeaders({ "Content-Type": "application/json; charset=utf-8" })
@@ -202,7 +174,7 @@ export async function handleStream(request, params, env) {
         }) });
       }
       const text = await upstream.text();
-      const rewritten = await rewriteM3U8(text, finalUrl, channelName, requestUrl, env.STREAM_SECRET);
+      const rewritten = await rewriteM3U8(text, finalUrl, channelName, requestUrl);
       return new Response(rewritten, {
         status: upstream.status,
         headers: responseHeaders({ "Content-Type": "application/vnd.apple.mpegurl" })
@@ -227,7 +199,7 @@ export async function handleStream(request, params, env) {
     return new Response(JSON.stringify({
       success: false,
       error: "Proxy error",
-      message: message === "STREAM_SECRET is not configured" ? message : "Upstream request failed"
+      message: "Upstream request failed"
     }), {
       status: 500,
       headers: responseHeaders({ "Content-Type": "application/json; charset=utf-8" })
