@@ -6,9 +6,9 @@ export default {
     const segments = url.pathname.split("/").filter(Boolean);
 
     // Main channel playlist: /SUPERTV_1.m3u8
-    if (segments.length === 1 && /\\.m3u8$/i.test(segments[0])) {
+    if (segments.length === 1 && /\.m3u8$/i.test(segments[0])) {
       return handleStream(request, {
-        channel: decodeURIComponent(segments[0].replace(/\\.m3u8$/i, ""))
+        channel: decodeURIComponent(segments[0].replace(/\.m3u8$/i, ""))
       }, env);
     }
 
