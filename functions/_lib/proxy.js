@@ -89,7 +89,7 @@ async function rewriteM3U8(body, baseUrl, channelName, requestUrl) {
     if (!trimmed || trimmed.startsWith("#")) return line;
     try {
       const absolute = new URL(trimmed, baseUrl).toString();
-      return await makeProxyUrl(channelName, absolute, requestUrl, secret);
+      return await makeProxyUrl(channelName, absolute, requestUrl);
     } catch {
       return line;
     }
